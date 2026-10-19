@@ -27,7 +27,7 @@ function removeEmptyState() {
   if (empty) empty.remove();
 }
 
-function createNoteItem(note) {
+function createNoteItem(note, isLocal = false) {
   const li = document.createElement("li");
 
   const content = document.createElement("div");
@@ -39,7 +39,14 @@ function createNoteItem(note) {
   body.textContent = note.body || "";
   content.append(title, body);
 
-  li.append(content);
+  const deleteBtn = document.createElement("button");
+  deleteBtn.type = "button";
+  deleteBtn.className = "delete-btn";
+  deleteBtn.textContent = "Delete";
+  deleteBtn.setAttribute("aria-label", `Delete note: ${note.title}`);
+  deleteBtn.addEventListener("click", () => handleDelete(note, li, deleteBtn, isLocal));
+
+  li.append(content, deleteBtn);
   return li;
 }
 
@@ -131,7 +138,7 @@ async function handleSubmit(event) {
   try {
     const { status, data } = await createNote({ title, body, userId: 1 });
     removeEmptyState();
-    notesList.prepend(createNoteItem(data));
+    notesList.prepend(createNoteItem(data, true));
     setStatus(`Note created (status ${status}, id ${data.id}).`, "success");
     noteForm.reset();
   } catch (error) {
@@ -139,6 +146,47 @@ async function handleSubmit(event) {
     setStatus("Sorry, we could not save your note. Your text is still in the form, so please try again.", "error");
   } finally {
     submitBtn.disabled = false;
+  }
+}
+
+/* ---------- DELETE: remove a note ---------- */
+
+/*
+ * JSONPlaceholder is a fake API: it never really stores notes we create.
+ * Every POST returns id 101, and that note does not exist on the server,
+ * so DELETE /posts/101 may answer 404 (or a fake 200). Our approach:
+ *   1. Always send the DELETE request, so the client behaves like it would
+ *      against a real API (the real QuickNotes backend will store notes).
+ *   2. For notes created in this session ("local" notes), treat a 404 as
+ *      success, because the server never had them and they are already gone.
+ *   3. For every other error (network, 500, 404 on a real note) keep the note
+ *      in the list and show an error, so the screen never lies about the server.
+ *   4. Remove the exact list item that was clicked (not "by id"), because all
+ *      created notes share id 101.
+ */
+async function deleteNote(id) {
+  return request(`${API_URL}/${id}`, { method: "DELETE" });
+}
+
+async function handleDelete(note, li, button, isLocal) {
+  button.disabled = true;
+  setStatus("Deleting note...", "loading");
+  try {
+    let status;
+    try {
+      ({ status } = await deleteNote(note.id));
+    } catch (error) {
+      const notFound = error.message.includes("status 404");
+      if (!(isLocal && notFound)) throw error;
+      status = 404;
+    }
+    li.remove();
+    if (notesList.children.length === 0) showEmptyState();
+    setStatus(`Note deleted (status ${status}).`, "success");
+  } catch (error) {
+    console.error(error);
+    button.disabled = false;
+    setStatus("Sorry, we could not delete that note. It is still in your list, so please try again.", "error");
   }
 }
 
